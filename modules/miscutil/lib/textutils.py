@@ -400,20 +400,8 @@ def wash_for_utf8(text, correct=True):
     if isinstance(text, unicode):
         return text.encode('utf-8')
 
-    ret = []
-    while True:
-        try:
-            text.decode("utf-8")
-        except UnicodeDecodeError, e:
-            if correct:
-                ret.append(text[:e.start])
-                text = text[e.end:]
-            else:
-                raise e
-        else:
-            break
-    ret.append(text)
-    return ''.join(ret)
+    errors = "ignore" if correct else "strict"
+    return text.decode("utf-8", errors).encode("utf-8", errors)
 
 def nice_size(size):
     """
@@ -584,7 +572,13 @@ def translate_to_ascii(values):
         else:
             encoded_text, encoding = guess_minimum_encoding(value)
             unicode_text = unicode(encoded_text.decode(encoding))
-            ascii_text = unidecode(unicode_text).encode('ascii')
+            decoded_text = ""
+            for unicode_char in unicode_text:
+                decoded_char = unidecode(unicode_char)
+                # Skip unrecognized characters
+                if decoded_char != "[?]":
+                    decoded_text += decoded_char
+            ascii_text = decoded_text.encode('ascii')
         values[index] = ascii_text
     return values
 

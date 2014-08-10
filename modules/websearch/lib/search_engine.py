@@ -105,7 +105,8 @@ from invenio.bibrank_downloads_similarity import register_page_view_event, calcu
 from invenio.bibindex_engine_stemmer import stem
 from invenio.bibindex_tokenizers.BibIndexDefaultTokenizer import BibIndexDefaultTokenizer
 from invenio.bibindex_tokenizers.BibIndexCJKTokenizer import BibIndexCJKTokenizer, is_there_any_CJK_character_in_text
-from invenio.bibindex_engine_utils import author_name_requires_phrase_search
+from invenio.bibindex_engine_utils import author_name_requires_phrase_search, \
+    get_field_tags
 from invenio.bibindex_engine_washer import wash_index_term, lower_index_term, wash_author_name
 from invenio.bibindex_engine_config import CFG_BIBINDEX_SYNONYM_MATCH_TYPE
 from invenio.bibindex_engine_utils import get_idx_indexer
@@ -520,11 +521,10 @@ def get_collection_reclist(coll, recreate_cache_if_needed=True):
         reclist = intbitset()
         query = "SELECT nbrecs,reclist FROM collection WHERE name=%s"
         res = run_sql(query, (coll, ), 1)
-        if res:
-            try:
-                reclist = intbitset(res[0][1])
-            except IndexError:
-                pass
+        try:
+            reclist = intbitset(res[0][1])
+        except (IndexError, TypeError):
+            pass
         collection_reclist_cache.cache[coll] = reclist
     # finally, return reclist:
     return collection_reclist_cache.cache[coll]
@@ -1822,15 +1822,23 @@ def get_coll_ancestors(coll):
 
 def get_coll_sons(coll, coll_type='r', public_only=1):
     """Return a list of sons (first-level descendants) of type 'coll_type' for collection 'coll'.
+       If coll_type = '*', both regular and virtual collections will be returned.
        If public_only, then return only non-restricted son collections.
     """
     coll_sons = []
+    if coll_type == '*':
+        coll_type_query = " IN ('r', 'v')"
+        query_params = (coll, )
+    else:
+        coll_type_query = "=%s"
+        query_params = (coll_type, coll)
+
     query = "SELECT c.name FROM collection AS c "\
             "LEFT JOIN collection_collection AS cc ON c.id=cc.id_son "\
             "LEFT JOIN collection AS ccc ON ccc.id=cc.id_dad "\
-            "WHERE cc.type=%s AND ccc.name=%s"
+            "WHERE cc.type%s AND ccc.name=%%s" % coll_type_query
     query += " ORDER BY cc.score DESC"
-    res = run_sql(query, (coll_type, coll))
+    res = run_sql(query, query_params)
     for name in res:
         if not public_only or not collection_restricted_p(name[0]):
             coll_sons.append(name[0])
@@ -1842,25 +1850,33 @@ class CollectionAllChildrenDataCacher(DataCacher):
 
         def cache_filler():
 
-            def get_all_children(coll, coll_type='r', public_only=1):
-                """Return a list of all children of type 'type' for collection 'coll'.
+            def get_all_children(coll, coll_type='r', public_only=1, d_internal_coll_sons=None):
+                """Return a list of all children of type 'coll_type' for collection 'coll'.
                    If public_only, then return only non-restricted child collections.
-                   If type='*', then return both regular and virtual collections.
+                   If coll_type='*', then return both regular and virtual collections.
+                   d_internal_coll_sons is an internal dictionary used in recursion for
+                   minimizing the number of database calls and should not be used outside
+                   this scope.
                 """
+                if not d_internal_coll_sons:
+                    d_internal_coll_sons = {}
+
                 children = []
-                if coll_type == '*':
-                    sons = get_coll_sons(coll, 'r', public_only) + get_coll_sons(coll, 'v', public_only)
-                else:
-                    sons = get_coll_sons(coll, coll_type, public_only)
-                for child in sons:
+
+                if coll not in d_internal_coll_sons:
+                    d_internal_coll_sons[coll] = get_coll_sons(coll, coll_type, public_only)
+
+                for child in d_internal_coll_sons[coll]:
                     children.append(child)
-                    children.extend(get_all_children(child, coll_type, public_only))
-                return children
+                    children.extend(get_all_children(child, coll_type, public_only, d_internal_coll_sons)[0])
+
+                return children, d_internal_coll_sons
 
             ret = {}
+            d_internal_coll_sons = None
             collections = collection_reclist_cache.cache.keys()
             for collection in collections:
-                ret[collection] = get_all_children(collection, '*', public_only=0)
+                ret[collection], d_internal_coll_sons = get_all_children(collection, '*', public_only=0, d_internal_coll_sons=d_internal_coll_sons)
             return ret
 
         def timestamp_verifier():
@@ -2320,13 +2336,13 @@ def search_unit(p, f=None, m=None, wl=0, ignore_synonyms=None):
 
     ## eventually look up runtime synonyms:
     hitset_synonyms = intbitset()
-    if f in CFG_WEBSEARCH_SYNONYM_KBRS:
+    if CFG_WEBSEARCH_SYNONYM_KBRS.has_key(f or 'anyfield'):
         if ignore_synonyms is None:
             ignore_synonyms = []
         ignore_synonyms.append(p)
         for p_synonym in get_synonym_terms(p,
-                             CFG_WEBSEARCH_SYNONYM_KBRS[f][0],
-                             CFG_WEBSEARCH_SYNONYM_KBRS[f][1]):
+                             CFG_WEBSEARCH_SYNONYM_KBRS[f or 'anyfield'][0],
+                             CFG_WEBSEARCH_SYNONYM_KBRS[f or 'anyfield'][1]):
             if p_synonym != p and \
                    not p_synonym in ignore_synonyms:
                 hitset_synonyms |= search_unit(p_synonym, f, m, wl,
@@ -3650,18 +3666,6 @@ def get_field_name(code):
     else:
         return ""
 
-def get_field_tags(field):
-    """Returns a list of MARC tags for the field code 'field'.
-       Returns empty list in case of error.
-       Example: field='author', output=['100__%','700__%']."""
-    out = []
-    query = """SELECT t.value FROM tag AS t, field_tag AS ft, field AS f
-                WHERE f.code=%s AND ft.id_field=f.id AND t.id=ft.id_tag
-                ORDER BY ft.score DESC"""
-    res = run_sql(query, (field, ))
-    for val in res:
-        out.append(val[0])
-    return out
 
 def get_fieldvalues_alephseq_like(recID, tags_in, can_see_hidden=False):
     """Return buffer of ALEPH sequential-like textual format with fields found

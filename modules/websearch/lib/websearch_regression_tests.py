@@ -922,7 +922,6 @@ class WebSearchCJKTokenizedSearchTest(InvenioTestCase):
             run_sql(query)
             self.reindexed = True
             wordTable = WordTable(index_name=self.index_name,
-                                  fields_to_index=get_index_tags(self.index_name),
                                   table_type = CFG_BIBINDEX_INDEX_TABLE_TYPE["Words"])
             wordTable.turn_off_virtual_indexes()
             wordTable.add_recIDs([[104, 104]], 10000)
@@ -936,12 +935,9 @@ class WebSearchCJKTokenizedSearchTest(InvenioTestCase):
                        WHERE name='%s'""" % (self.last_updated, self.index_name)
             run_sql(query)
             wordTable = WordTable(index_name=self.index_name,
-                                  fields_to_index=get_index_tags(self.index_name),
                                   table_type = CFG_BIBINDEX_INDEX_TABLE_TYPE["Words"])
             wordTable.turn_off_virtual_indexes()
             wordTable.add_recIDs([[104, 104]], 10000)
-
-
 
     def test_title_cjk_tokenized_two_characters(self):
         """CJKTokenizer - test for finding chinese poetry with two CJK characters"""
@@ -4979,7 +4975,6 @@ class WebSearchCustomCollectionBoxesName(InvenioTestCase):
                          test_web_page_content(CFG_SITE_URL + '/collection/CERN%20Divisions?ln=af',
                                                expected_text='Browse by division:'))
 
-
 class WebSearchDetailedRecordTabsTest(InvenioTestCase):
     def test_detailed_record(self):
         """websearch - check detailed record main tab"""
@@ -5049,6 +5044,39 @@ class WebSearchDetailedRecordTabsTest(InvenioTestCase):
                                                    expected_text='Linkbacks',
                                                    unexpected_text='The server encountered an error'))
 
+class WebSearchResolveDOITest(InvenioTestCase):
+    """Checks that we can resolve DOIs """
+
+    def test_resolve_existing_doi(self):
+        """websearch - check resolution of a DOI for an existing record"""
+        error_messages = []
+        error_messages.extend(test_web_page_content(CFG_SITE_URL + "/doi/10.4028/www.scientific.net/MSF.638-642.1098",
+                                                    expected_text = ['Influence of processing parameters on the manufacturing of anode-supported solid oxide fuel cells by different wet chemical routes'],
+                                                    unexpected_text = ['404 Not Found', 'could not be resolved']))
+
+        error_messages.extend(test_web_page_content(CFG_SITE_URL + "/doi/10.1063/1.2737136",
+                                                    expected_text = ['Epitaxially stabilized growth of orthorhombic LuScO3 thin films'],
+                                                    unexpected_text = ['404 Not Found', 'could not be resolved']))
+        if error_messages:
+            self.fail(merge_error_messages(error_messages))
+
+    def test_resolve_non_existing_doi(self):
+        """websearch - check resolution of a non-existing DOI"""
+        error_messages = []
+        error_messages.extend(test_web_page_content(CFG_SITE_URL + "/doi/foobar",
+                                                    expected_text = ['could not be resolved', 'foobar'],
+                                                    unexpected_text = ['404 Not Found']))
+        if error_messages:
+            self.fail(merge_error_messages(error_messages))
+
+    def test_resolve_non_doi(self):
+        """websearch - check resolution of a non-DOI value living in 0247_a (without 0247__2:DOI)"""
+        error_messages = []
+        error_messages.extend(test_web_page_content(CFG_SITE_URL + "/doi/0255-5476",
+                                                    expected_text = ['could not be resolved', '0255-5476'],
+                                                    unexpected_text = ['404 Not Found']))
+        if error_messages:
+            self.fail(merge_error_messages(error_messages))
 
 TEST_SUITE = make_test_suite(WebSearchWebPagesAvailabilityTest,
                              WebSearchTestSearch,
@@ -5103,8 +5131,8 @@ TEST_SUITE = make_test_suite(WebSearchWebPagesAvailabilityTest,
                              WebSearchCJKTokenizedSearchTest,
                              WebSearchItemCountQueryTest,
                              WebSearchCustomCollectionBoxesName,
-                             WebSearchDetailedRecordTabsTest,)
-
+                             WebSearchDetailedRecordTabsTest,
+                             WebSearchResolveDOITest)
 
 if __name__ == "__main__":
     run_test_suite(TEST_SUITE, warn_user=True)

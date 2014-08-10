@@ -1,5 +1,7 @@
+# -*- coding:utf-8 -*-
+##
 ## This file is part of Invenio.
-## Copyright (C) 2012 CERN.
+## Copyright (C) 2010, 2011, 2012 CERN.
 ##
 ## Invenio is free software; you can redistribute it and/or
 ## modify it under the terms of the GNU General Public License as
@@ -15,23 +17,11 @@
 ## along with Invenio; if not, write to the Free Software Foundation, Inc.,
 ## 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 
-bibdocfilepluginsdir = $(libdir)/python/invenio/bibdocfile_plugins
+def get_pubinfo_standard_form(pubinfo):
+    """
 
-bibdocfileplugins_DATA = bom_*.py
-
-pylibdir = $(libdir)/python/invenio
-
-pylib_DATA = bibdocfile_config.py file.py \
-             bibdocfile_webinterface.py \
-             bibdocfile_templates.py \
-             bibdocfile_managedocfiles.py \
-             bibdocfile.py \
-             bibdocfilecli.py \
-             bibdocfile_regression_tests.py \
-             bibdocfile_web_tests.py
-
-noinst_DATA = fulltext_files_migration_kit.py icon_migration_kit.py
-
-EXTRA_DIST = $(pylib_DATA) $(noinst_DATA) $(bibdocfileplugins)
-
-CLEANFILES = *~ *.tmp *.pyc
+    """
+    if all(key in pubinfo for key in ('c', 'p', 'v', 'y', )):
+        return '%s %s (%s) %s' % (pubinfo['p'], pubinfo['v'], pubinfo['y'], pubinfo['c'].split("-", 1)[0], )
+    else:
+        return None
